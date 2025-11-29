@@ -1,0 +1,21 @@
+# Ignore virtual environments
+.venv/
+uday-backend-env/
+
+# Ignore caches and binaries
+__pycache__/
+*.pyd
+*.dll
+*.lib
+*.pt
+*.pth
+*.h5
+*.pkl
+*.zip
+*.tar
+*.csv
+*.log
+
+# IDE / OS stuff
+.vscode/
+.DS_Store
