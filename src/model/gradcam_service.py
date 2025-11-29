@@ -35,12 +35,16 @@ def get_gradcam_standard(model, input_tensor, target_class=None):
         nonlocal gradients
         gradients = grad_output[0]
 
-    # Use the same layer as generate_gradcam.py: model.features[-4]
-    # For MobileNetV2, this targets a deeper convolutional layer
-    if hasattr(model, 'features'):
-        target_layer = model.features[-4]
+    # Detect appropriate layer based on model architecture
+    # For ResNet50_VGG16_Fusion, use ResNet's layer4
+    if hasattr(model, 'resnet') and hasattr(model.resnet, 'layer4'):
+        # ResNet50_VGG16_Fusion model
+        target_layer = model.resnet.layer4[-1]
     elif hasattr(model, 'layer4'):  # ResNet
         target_layer = model.layer4[-1]
+    elif hasattr(model, 'features'):
+        # MobileNetV2 or VGG
+        target_layer = model.features[-4]
     else:
         # Fallback: try to find the last convolutional layer
         for module in reversed(list(model.modules())):

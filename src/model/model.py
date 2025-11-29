@@ -1,51 +1,73 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
+from torchvision import models
 from typing import Optional
 
-def get_model(name: str = "mobilenet_v2", num_classes: int = 2, pretrained: bool = True):
-    """
-    Get model architecture for histopathology cancer detection
-    
-    Args:
-        name: Model architecture name
-        num_classes: Number of output classes
-        pretrained: Whether to use pretrained weights (deprecated, using weights parameter)
-    
-    Returns:
-        PyTorch model
-    """
-    weights = "DEFAULT" if pretrained else None
-    
-    if name == "mobilenet_v2":
-        model = models.mobilenet_v2(weights=weights)
-        # Replace the classifier
-        model.classifier = nn.Sequential(
-            nn.Dropout(0.2),
-            nn.Linear(model.last_channel, num_classes)
+
+class ResNet50_VGG16_Fusion(nn.Module):
+    def __init__(self, num_classes: int = 2, pretrained: bool = True):
+        super().__init__()
+
+        self.resnet = models.resnet50(
+            weights=models.ResNet50_Weights.IMAGENET1K_V2 if pretrained else None
         )
-    elif name == "resnet18":
-        model = models.resnet18(weights=weights)
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
-    elif name == "resnet50":
-        model = models.resnet50(weights=weights)
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
-    elif name == "efficientnet_b0":
-        try:
-            from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
-            model = efficientnet_b0(weights=EfficientNet_B0_Weights.DEFAULT if pretrained else None)
-            model.classifier = nn.Sequential(
-                nn.Dropout(0.2),
-                nn.Linear(model.classifier[1].in_features, num_classes)
-            )
-        except ImportError:
-            print("EfficientNet not available, falling back to MobileNetV2")
-            model = models.mobilenet_v2(weights=weights)
-            model.classifier = nn.Sequential(
-                nn.Dropout(0.2),
-                nn.Linear(model.last_channel, num_classes)
-            )
+        self.resnet.fc = nn.Identity()        
+        resnet_out = 2048                    
+
+
+        self.vgg = models.vgg16(
+            weights=models.VGG16_Weights.IMAGENET1K_V1 if pretrained else None
+        )
+        
+        self.vgg.classifier = nn.Sequential(
+            *list(self.vgg.classifier.children())[:-1]
+        )
+        vgg_out = 4096
+        
+        # Disable in-place operations in VGG to avoid Grad-CAM conflicts
+        for module in self.vgg.modules():
+            if isinstance(module, nn.ReLU):
+                module.inplace = False
+
+       
+        for param in self.resnet.parameters():
+            param.requires_grad = False
+        for param in self.vgg.parameters():
+            param.requires_grad = False
+
+   
+        self.fc = nn.Sequential(
+            nn.Linear(resnet_out + vgg_out, 1024),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+
+            nn.Linear(1024, 256),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+
+            nn.Linear(256, num_classes)
+        )
+
+    def forward(self, x):
+        f1 = self.resnet(x)    
+        f2 = self.vgg(x)       
+        fused = torch.cat((f1, f2), dim=1)
+        return self.fc(fused)
+
+
+
+def get_model(name: str = "fusion", num_classes: int = 2, pretrained: bool = True) -> nn.Module:
+
+    if name == "fusion" or name == "resnet50_vgg16":
+        return ResNet50_VGG16_Fusion(num_classes=num_classes, pretrained=pretrained)
+
+    elif name == "mobilenet_v2":  
+        model = models.mobilenet_v2(
+            weights=models.MobileNet_V2_Weights.IMAGENET1K_V1 if pretrained else None
+        )
+        in_features = model.classifier[1].in_features
+        model.classifier[1] = nn.Linear(in_features, num_classes)
+        return model
+
     else:
-        raise ValueError(f"Unknown model architecture: {name}")
-    
-    return model
+        raise ValueError(f"Unsupported model architecture: {name}")

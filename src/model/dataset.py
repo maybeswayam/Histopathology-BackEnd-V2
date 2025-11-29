@@ -1,115 +1,100 @@
 import os
-import torch
-from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
+from typing import Tuple, Dict
 from PIL import Image
-import numpy as np
-from sklearn.model_selection import train_test_split
-from typing import Tuple, List
+import torch
+from torch.utils.data import Dataset, DataLoader, random_split
+from torchvision import transforms
 
-class HistopathologyDataset(Dataset):
-    """Dataset for histopathology images"""
-    
-    def __init__(self, image_paths: List[str], labels: List[int], transform=None):
-        self.image_paths = image_paths
-        self.labels = labels
+
+class HistopathDataset(Dataset):
+    def __init__(self, root_dir: str, transform=None):
+        self.root_dir = root_dir
         self.transform = transform
-    
+        self.samples = []
+
+        binary_mapping: Dict[str, int] = {
+           
+            'BREAST_ADENOSIS': 0,
+            'BREAST_FIBRODENOMA': 0,
+            'BREAST_PYLLODES_TUMOR': 0, 
+            'BREAST_TUBULAR_ADENOMA': 0,
+       
+            'BREAST_DUCTAL_CARCINOMA': 1,
+            'BREAST_LOBULAR_CARCINOMA': 1,
+            'BREAST_MUCINOUS_CARCINOMA': 1,
+            'BREAST_PAPILLARY_CARCINOMA': 1,
+           
+        }
+
+        for folder_name, label in binary_mapping.items():
+            folder_path = os.path.join(root_dir, folder_name)
+            if not os.path.isdir(folder_path):
+                print(f"Warning: Folder '{folder_path}' not found. Skipping.")
+                continue
+            folder_samples = 0
+            for fname in sorted(os.listdir(folder_path)):
+                if fname.lower().endswith((".png", ".jpg", ".jpeg")):
+                    self.samples.append((os.path.join(folder_path, fname), label))
+                    folder_samples += 1
+            print(f"Loaded {folder_samples} samples from '{folder_name}' (label {label})")
+
+        if not self.samples:
+            raise ValueError(f"No valid images found in {root_dir}. Check folder structure and image files.")
+
+        total_benign = sum(1 for _, lbl in self.samples if lbl == 0)
+        total_malignant = sum(1 for _, lbl in self.samples if lbl == 1)
+        print(f"Total dataset: {len(self.samples)} samples ({total_benign} benign, {total_malignant} malignant)")
+
     def __len__(self):
-        return len(self.image_paths)
-    
+        return len(self.samples)
+
     def __getitem__(self, idx):
-        image_path = self.image_paths[idx]
-        label = self.labels[idx]
-        
-        # Load image
-        image = Image.open(image_path).convert('RGB')
-        
+        img_path, label = self.samples[idx]
+        image = Image.open(img_path).convert("RGB")
         if self.transform:
             image = self.transform(image)
-        
         return image, label
 
-def create_train_val_loaders(
-    root_dir: str,
-    batch_size: int = 32,
-    val_ratio: float = 0.2,
-    size: int = 224,
-    num_workers: int = 4,
-    seed: int = 42
-) -> Tuple[DataLoader, DataLoader]:
-    """
-    Create training and validation data loaders
+
+def get_transforms(train: bool = True, size: int = 224):
     
-    Args:
-        root_dir: Root directory containing data
-        batch_size: Batch size for data loaders
-        val_ratio: Ratio of data to use for validation
-        size: Image size for resizing
-        num_workers: Number of worker processes
-        seed: Random seed for reproducibility
-    
-    Returns:
-        Tuple of (train_loader, val_loader)
-    """
-    # Define transforms
-    train_transform = transforms.Compose([
-        transforms.Resize((size, size)),
-        transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomRotation(degrees=10),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                           std=[0.229, 0.224, 0.225])
-    ])
-    
-    val_transform = transforms.Compose([
-        transforms.Resize((size, size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], 
-                           std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Collect image paths and labels
-    image_paths = []
-    labels = []
-    
-    # Assuming directory structure: root_dir/benign/ and root_dir/malignant/
-    benign_dir = os.path.join(root_dir, 'benign')
-    malignant_dir = os.path.join(root_dir, 'malignant')
-    
-    if os.path.exists(benign_dir):
-        for filename in os.listdir(benign_dir):
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                image_paths.append(os.path.join(benign_dir, filename))
-                labels.append(0)  # 0 for benign
-    
-    if os.path.exists(malignant_dir):
-        for filename in os.listdir(malignant_dir):
-            if filename.lower().endswith(('.png', '.jpg', '.jpeg')):
-                image_paths.append(os.path.join(malignant_dir, filename))
-                labels.append(1)  # 1 for malignant
-    
-    if not image_paths:
-        raise ValueError(f"No images found in {root_dir}")
-    
-    # Split into train and validation
-    train_paths, val_paths, train_labels, val_labels = train_test_split(
-        image_paths, labels, test_size=val_ratio, random_state=seed, stratify=labels
-    )
-    
-    # Create datasets
-    train_dataset = HistopathologyDataset(train_paths, train_labels, train_transform)
-    val_dataset = HistopathologyDataset(val_paths, val_labels, val_transform)
-    
-    # Create data loaders
-    train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True, 
-        num_workers=num_workers, pin_memory=True
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False, 
-        num_workers=num_workers, pin_memory=True
-    )
-    
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    if train:
+        return transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            normalize
+        ])
+    else:
+        return transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            normalize
+        ])
+
+
+def load_dataset(root_dir: str, train: bool = True, size: int = 224) -> HistopathDataset:
+    return HistopathDataset(root_dir, transform=get_transforms(train=train, size=size))
+
+
+def create_train_val_loaders(root_dir: str,
+                             batch_size: int = 32,
+                             val_ratio: float = 0.2,
+                             size: int = 224,
+                             num_workers: int = 4,
+                             seed: int = 42) -> Tuple[DataLoader, DataLoader]:
+    torch.manual_seed(seed)
+    full_dataset = load_dataset(root_dir, train=True, size=size)  
+    val_size = int(len(full_dataset) * val_ratio)
+    train_size = len(full_dataset) - val_size
+    train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size],
+                                              generator=torch.Generator().manual_seed(seed))
+
+    val_dataset.dataset.transform = get_transforms(train=False, size=size)
+
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers,
+                              pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    print(f"Created loaders: Train={len(train_loader.dataset)} samples, Val={len(val_loader.dataset)} samples")
     return train_loader, val_loader

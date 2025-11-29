@@ -41,13 +41,13 @@ class HistoPathModel:
             model_path = self._find_model_file()
             print(f"✅ Found model at: {model_path}")
 
-            from src.model.model import get_model
+            from src.model.model import ResNet50_VGG16_Fusion
             
             # Load checkpoint
             checkpoint = torch.load(str(model_path), map_location=self.device)
             
             # Initialize model architecture
-            model = get_model(name="mobilenet_v2", num_classes=2, pretrained=False)
+            model = ResNet50_VGG16_Fusion(num_classes=2, pretrained=False)
             
             # Determine if the checkpoint is a state_dict or a full checkpoint dict
             if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
@@ -65,9 +65,6 @@ class HistoPathModel:
         except Exception as e:
             print(f"❌ Error loading model: {str(e)}")
             raise
-            
-        model.eval()
-        return model
 
     def _get_transforms(self):
         return transforms.Compose([

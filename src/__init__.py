@@ -1,1 +1,0 @@
-# Histopathology Cancer Detection Package
